@@ -237,8 +237,8 @@ try {
   Write-Output "Finished downloading Posh-ACME working directory"
 
   try {
-    Write-Output "Creating new Certificate"
-    New-AcmeCertificate -WorkingDirectory $workingDirectory -DomainNames $DomainNames -AcmeContact $AcmeContact -AcmeDirectory $AcmeDirectory | Out-Null
+    Write-Output "Renewing Certificate with Posh-ACME"
+    New-AcmeCertificate -WorkingDirectory $workingDirectory -DomainNames $DomainNames -AcmeContact $AcmeContact -AcmeDirectory $AcmeDirectory
 
     # For wildcard certificates, Posh-ACME replaces * with ! in the directory name
     $certificateName = ($DomainNames | Select-Object -First 1).Replace("*", "!")
@@ -247,7 +247,7 @@ try {
     Write-Output "Importing Certificate to KeyVault"
     Import-AcmeCertificateToKeyVault -WorkingDirectory $workingDirectory -CertificateName $certificateName -KeyVaultName $KeyVaultName -KeyVaultCertificateName $azureKeyVaultCertificateName | Out-Null
 
-    Write-Output "Enable CDN Endpoint Custom HTTPS"
+    Write-Output "Enabling CDN Endpoint Custom HTTPS"
     Set-CdnCustomHttps -DomainNames $DomainNames -KeyVaultName $KeyVaultName -KeyVaultSecretName $azureKeyVaultCertificateName -CdnProfileName $CdnProfileName -CdnEndpointName $CdnEndpointName
   }
   finally {
