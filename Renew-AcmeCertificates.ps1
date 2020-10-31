@@ -214,8 +214,17 @@ function Set-CdnCustomHttps {
 try {
   Connect-AzureRunAsAccount
 
-  $servicePrincipal = Get-AzADServicePrincipal -ApplicationId (Get-AzContext).Account.Id
-  Set-AzKeyVaultAccessPolicy -VaultName $KeyVaultName -ObjectId $servicePrincipal.Id -PermissionsToSecrets @("get") -PermissionsToCertificates @("get", "import")
+  # Set RunAsAccount AccessPolicy to KeyVault
+  $runAsServicePrincipal = Get-AzADServicePrincipal -ApplicationId (Get-AzContext).Account.Id
+  Set-AzKeyVaultAccessPolicy -VaultName $KeyVaultName -ObjectId $runAsServicePrincipal.Id -PermissionsToSecrets @("get") -PermissionsToCertificates @("get", "import")
+
+  # Set Microsoft.Azure.CDN AccessPolicy to KeyVault
+  $microsoftCdnApplicationId = "205478c0-bd83-4e1b-a9d6-db63a3e1e1c8"
+  $microsoftCdnServicePrincipal = Get-AzADServicePrincipal -ApplicationId $microsoftCdnApplicationId
+  if ($null -eq $microsoftCdnServicePrincipal) {
+    $microsoftCdnServicePrincipal = New-AzADServicePrincipal -ApplicationId $microsoftCdnApplicationId
+  }
+  Set-AzKeyVaultAccessPolicy -VaultName $KeyVaultName -ObjectId $microsoftCdnServicePrincipal.Id -PermissionsToSecrets @("get")
 
   $workingDirectory = Join-Path -Path (Convert-Path .) -ChildPath "posh-acme"
 
