@@ -26,26 +26,14 @@ Param (
 )
 
 function Connect-AzureRunAsAccount {
-  try {
-    $azureRunAsConnection = Get-AutomationConnection -Name "AzureRunAsConnection"
-    Connect-AzAccount -Tenant $azureRunAsConnection.TenantId `
-      -Subscription $azureRunAsConnection.SubscriptionId `
-      -ApplicationId $azureRunAsConnection.ApplicationId `
-      -CertificateThumbprint $azureRunAsConnection.CertificateThumbprint `
-      -ServicePrincipal | Out-Null
+  $azureRunAsConnection = Get-AutomationConnection -Name "AzureRunAsConnection" -ErrorAction Stop
+  Connect-AzAccount -Tenant $azureRunAsConnection.TenantId `
+    -Subscription $azureRunAsConnection.SubscriptionId `
+    -ApplicationId $azureRunAsConnection.ApplicationId `
+    -CertificateThumbprint $azureRunAsConnection.CertificateThumbprint `
+    -ServicePrincipal | Out-Null
 
-    Write-Output "Connected to Azure as AzureRunAsConnection $($azureRunAsConnection.ApplicationId))"
-  }
-  catch {
-    if (!$azureRunAsConnection) {
-      $ErrorMessage = "AzureRunAsConnection not found."
-      throw $ErrorMessage
-    }
-    else {
-      Write-Error -Message $_.Exception
-      throw $_.Exception
-    }
-  }
+  Write-Output "Connected to Azure as AzureRunAsConnection $($azureRunAsConnection.ApplicationId))"
 }
 
 function Get-AzureResourceManagerAccessToken {
