@@ -197,52 +197,47 @@ function Set-CdnCustomHttps {
   }
 }
 
+Connect-AzureRunAsAccount
+
+# Set RunAsAccount AccessPolicy to KeyVault
+$runAsServicePrincipal = Get-AzADServicePrincipal -ApplicationId (Get-AzContext).Account.Id
+Set-AzKeyVaultAccessPolicy -VaultName $KeyVaultName -ObjectId $runAsServicePrincipal.Id -PermissionsToSecrets @("get") -PermissionsToCertificates @("get", "import")
+
+$workingDirectory = Join-Path -Path (Convert-Path .) -ChildPath "posh-acme"
+
+$storageContext = New-AzStorageContext -StorageAccountName $StorageAccountName -UseConnectedAccount -Protocol "https"
+New-AzStorageContainer -Name $PoshAcmeBlobContainer -Permission Off -Context $storageContext -ErrorAction SilentlyContinue | Out-Null
+
+New-Item $workingDirectory -ItemType "directory" -Force
+
+$storageBlobs = Get-AzStorageBlob -Container $PoshAcmeBlobContainer -Context $storageContext -ErrorAction Stop
+
+Write-Output "Downloading files..."
+
+foreach ($blob in $storageBlobs) {
+  Write-Output "Downloading $($blob.Name)"
+  Get-AzStorageBlobContent -Container $PoshAcmeBlobContainer -Blob $blob.Name -Destination $workingDirectory -Context $storageContext | Out-Null
+}
+
+Write-Output "Finished downloading Posh-ACME working directory"
+
 try {
-  Connect-AzureRunAsAccount
+  Write-Output "Renewing Certificate with Posh-ACME"
+  New-AcmeCertificate -WorkingDirectory $workingDirectory -DomainNames $DomainNames -AcmeContact $AcmeContact -AcmeDirectory $AcmeDirectory
 
-  # Set RunAsAccount AccessPolicy to KeyVault
-  $runAsServicePrincipal = Get-AzADServicePrincipal -ApplicationId (Get-AzContext).Account.Id
-  Set-AzKeyVaultAccessPolicy -VaultName $KeyVaultName -ObjectId $runAsServicePrincipal.Id -PermissionsToSecrets @("get") -PermissionsToCertificates @("get", "import")
+  # For wildcard certificates, Posh-ACME replaces * with ! in the directory name
+  $certificateName = ($DomainNames | Select-Object -First 1).Replace("*", "!")
+  $azureKeyVaultCertificateName = $certificateName.Replace(".", "-").Replace("!", "wildcard")
 
-  $workingDirectory = Join-Path -Path (Convert-Path .) -ChildPath "posh-acme"
+  Write-Output "Importing Certificate to KeyVault"
+  Import-AcmeCertificateToKeyVault -WorkingDirectory $workingDirectory -CertificateName $certificateName -KeyVaultName $KeyVaultName -KeyVaultCertificateName $azureKeyVaultCertificateName | Out-Null
 
-  $storageContext = New-AzStorageContext -StorageAccountName $StorageAccountName -UseConnectedAccount -Protocol "https"
-  New-AzStorageContainer -Name $PoshAcmeBlobContainer -Permission Off -Context $storageContext -ErrorAction SilentlyContinue | Out-Null
-
-  New-Item $workingDirectory -ItemType "directory" -Force
-
-  $storageBlobs = Get-AzStorageBlob -Container $PoshAcmeBlobContainer -Context $storageContext -ErrorAction Stop
-
-  Write-Output "Downloading files..."
-
-  foreach ($blob in $storageBlobs) {
-    Write-Output "Downloading $($blob.Name)"
-    Get-AzStorageBlobContent -Container $PoshAcmeBlobContainer -Blob $blob.Name -Destination $workingDirectory -Context $storageContext | Out-Null
-  }
-
-  Write-Output "Finished downloading Posh-ACME working directory"
-
-  try {
-    Write-Output "Renewing Certificate with Posh-ACME"
-    New-AcmeCertificate -WorkingDirectory $workingDirectory -DomainNames $DomainNames -AcmeContact $AcmeContact -AcmeDirectory $AcmeDirectory
-
-    # For wildcard certificates, Posh-ACME replaces * with ! in the directory name
-    $certificateName = ($DomainNames | Select-Object -First 1).Replace("*", "!")
-    $azureKeyVaultCertificateName = $certificateName.Replace(".", "-").Replace("!", "wildcard")
-
-    Write-Output "Importing Certificate to KeyVault"
-    Import-AcmeCertificateToKeyVault -WorkingDirectory $workingDirectory -CertificateName $certificateName -KeyVaultName $KeyVaultName -KeyVaultCertificateName $azureKeyVaultCertificateName | Out-Null
-
-    Write-Output "Enabling CDN Endpoint Custom HTTPS"
-    Set-CdnCustomHttps -DomainNames $DomainNames -KeyVaultName $KeyVaultName -KeyVaultSecretName $azureKeyVaultCertificateName -CdnProfileName $CdnProfileName -CdnEndpointName $CdnEndpointName
-  }
-  finally {
-    Write-Output "Uploading files..."
-    Get-ChildItem -File -Recurse $workingDirectory | Set-AzStorageBlobContent -Container $PoshAcmeBlobContainer -Context $storageContext -Force | Out-Null
-    Write-Output "Finished uploading Posh-ACME working directory"
-  }
+  Write-Output "Enabling CDN Endpoint Custom HTTPS"
+  Set-CdnCustomHttps -DomainNames $DomainNames -KeyVaultName $KeyVaultName -KeyVaultSecretName $azureKeyVaultCertificateName -CdnProfileName $CdnProfileName -CdnEndpointName $CdnEndpointName
 }
-catch {
-  Write-Output $_
-  throw $_
+finally {
+  Write-Output "Uploading files..."
+  Get-ChildItem -File -Recurse $workingDirectory | Set-AzStorageBlobContent -Container $PoshAcmeBlobContainer -Context $storageContext -Force | Out-Null
+  Write-Output "Finished uploading Posh-ACME working directory"
 }
+
