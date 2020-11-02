@@ -1,9 +1,6 @@
 [CmdletBinding()]
 Param (
   [Parameter(Mandatory = $true)]
-  [string] $SubscriptionId,
-
-  [Parameter(Mandatory = $true)]
   [string] $StorageAccountName,
 
   [Parameter(Mandatory = $true)]
@@ -31,13 +28,13 @@ Param (
 function Connect-AzureRunAsAccount {
   try {
     $azureRunAsConnection = Get-AutomationConnection -Name "AzureRunAsConnection"
-    Connect-AzAccount -Tenant $azureRunAsConnection.TenantID `
-      -Subscription $SubscriptionId `
-      -ApplicationId $azureRunAsConnection.ApplicationID `
+    Connect-AzAccount -Tenant $azureRunAsConnection.TenantId `
+      -Subscription $azureRunAsConnection.SubscriptionId `
+      -ApplicationId $azureRunAsConnection.ApplicationId `
       -CertificateThumbprint $azureRunAsConnection.CertificateThumbprint `
       -ServicePrincipal | Out-Null
 
-    Write-Output "Connected to Azure as AzureRunAsConnection $($azureRunAsConnection.ApplicationID))"
+    Write-Output "Connected to Azure as AzureRunAsConnection $($azureRunAsConnection.ApplicationId))"
   }
   catch {
     if (!$azureRunAsConnection) {
