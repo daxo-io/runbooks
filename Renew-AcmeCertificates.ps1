@@ -127,8 +127,8 @@ function Import-AcmeCertificateToKeyVault {
 
   # If we have a new certificate, import it
   if (-not $azureKeyVaultCertificate -or $azureKeyVaultCertificate.Thumbprint -ne $certificate.Thumbprint) {
-    Import-AzKeyVaultCertificate -VaultName $KeyVaultName -Name $KeyVaultCertificateName -FilePath $pfxFilePath -Password $certData.PfxPass | Out-Null
-    Write-Verbose "New Certificate Imported to KeyVault with Thumbprint $($certificate.Thumbprint)" -Verbose
+    Import-AzKeyVaultCertificate -VaultName $KeyVaultName -Name $KeyVaultCertificateName -FilePath $certData.PfxFullChain -Password $certData.PfxPass | Out-Null
+    Write-Verbose "Imported new Certificate with Thumbprint $($certificate.Thumbprint) into KeyVault" -Verbose
     return $True
   }
 
@@ -186,7 +186,7 @@ function Set-CdnCustomHttps {
     Write-Verbose "Sending EnableCustomHttps Request for Domain $domain" -Verbose
     $url = "https://management.azure.com/subscriptions/$subscriptionId/resourceGroups/$resourceGroupName/providers/Microsoft.Cdn/profiles/$CdnProfileName/endpoints/$CdnEndpointName/customDomains/$($domain.Replace(".", "-"))/enableCustomHttps?api-version=2019-04-15"
     $resp = Invoke-RestMethod -Uri $url -Method "Post" -Headers $requestHeaders -Body $requestBody -ContentType "application/json"
-    Write-Verbose $resp | ConvertTo-Json -Depth 10 -Verbose
+    Write-Verbose ($resp | ConvertTo-Json -Depth 10) -Verbose
   }
 }
 
@@ -231,8 +231,7 @@ try {
 
   if ($newCertificateImported) {
     Write-Verbose "Enabling CDN Endpoint Custom HTTPS" -Verbose
-    $cdnActivation = Set-CdnCustomHttps -DomainNames $DomainNames -KeyVaultName $KeyVaultName -KeyVaultSecretName $azureKeyVaultCertificateName -CdnProfileName $CdnProfileName -CdnEndpointName $CdnEndpointName
-    Write-Verbose $cdnActivation -Verbose
+    Set-CdnCustomHttps -DomainNames $DomainNames -KeyVaultName $KeyVaultName -KeyVaultSecretName $azureKeyVaultCertificateName -CdnProfileName $CdnProfileName -CdnEndpointName $CdnEndpointName | Out-Null
   }
 }
 finally {
