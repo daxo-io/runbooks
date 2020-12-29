@@ -33,7 +33,7 @@ function Connect-AzureRunAsAccount {
     -CertificateThumbprint $azureRunAsConnection.CertificateThumbprint `
     -ServicePrincipal | Out-Null
 
-  Write-Output "Connected to Azure as AzureRunAsConnection ($($azureRunAsConnection.ApplicationId))"
+  Write-Verbose "Connected to Azure as AzureRunAsConnection (Application ID: $($azureRunAsConnection.ApplicationId))" -Verbose
 }
 
 function Get-AzureResourceManagerAccessToken {
@@ -126,13 +126,13 @@ function Import-AcmeCertificateToKeyVault {
   $azureKeyVaultCertificate = Get-AzKeyVaultCertificate -VaultName $KeyVaultName -Name $KeyVaultCertificateName -ErrorAction SilentlyContinue
 
   # If we have a new certificate, import it
-  If (-not $azureKeyVaultCertificate -or $azureKeyVaultCertificate.Thumbprint -ne $certificate.Thumbprint) {
+  if (-not $azureKeyVaultCertificate -or $azureKeyVaultCertificate.Thumbprint -ne $certificate.Thumbprint) {
     Import-AzKeyVaultCertificate -VaultName $KeyVaultName -Name $KeyVaultCertificateName -FilePath $pfxFilePath -Password $certData.PfxPass | Out-Null
-    Write-Output "New Certificate Imported to KeyVault with Thumbprint $($certificate.Thumbprint)"
+    Write-Verbose "New Certificate Imported to KeyVault with Thumbprint $($certificate.Thumbprint)" -Verbose
     return $True
   }
 
-  Write-Output "Certificate with Thumbprint $($certificate.Thumbprint) is already present in KeyVault"
+  Write-Verbose "Certificate with Thumbprint $($certificate.Thumbprint) is already present in KeyVault" -Verbose
   return $False
 }
 
@@ -183,12 +183,15 @@ function Set-CdnCustomHttps {
   }
 
   foreach ($domain in $DomainNames) {
-    Write-Output "Sending EnableCustomHttps Request for Domain $domain"
+    Write-Verbose "Sending EnableCustomHttps Request for Domain $domain" -Verbose
     $url = "https://management.azure.com/subscriptions/$subscriptionId/resourceGroups/$resourceGroupName/providers/Microsoft.Cdn/profiles/$CdnProfileName/endpoints/$CdnEndpointName/customDomains/$($domain.Replace(".", "-"))/enableCustomHttps?api-version=2019-04-15"
     $resp = Invoke-RestMethod -Uri $url -Method "Post" -Headers $requestHeaders -Body $requestBody -ContentType "application/json"
-    Write-Output $resp | ConvertTo-Json -Depth 10
+    Write-Verbose $resp | ConvertTo-Json -Depth 10 -Verbose
   }
 }
+
+# Main entry
+$VerbosePreference = "SilentlyContinue"
 
 Connect-AzureRunAsAccount
 
@@ -205,37 +208,36 @@ New-Item $workingDirectory -ItemType "directory" -Force
 
 $storageBlobs = Get-AzStorageBlob -Container $PoshAcmeBlobContainer -Context $storageContext -ErrorAction Stop
 
-Write-Output "Downloading files..."
+Write-Verbose "Downloading files..." -Verbose
 
 foreach ($blob in $storageBlobs) {
-  Write-Output "Downloading $($blob.Name)"
+  Write-Verbose "Downloading $($blob.Name)" -Verbose
   Get-AzStorageBlobContent -Container $PoshAcmeBlobContainer -Blob $blob.Name -Destination $workingDirectory -Context $storageContext | Out-Null
 }
 
-Write-Output "Finished downloading Posh-ACME working directory"
+Write-Verbose "Finished downloading Posh-ACME working directory" -Verbose
 
 try {
-  Write-Output "Renewing Certificate with Posh-ACME"
+  Write-Verbose "Renewing Certificate with Posh-ACME" -Verbose
 
-  $output = New-AcmeCertificate -WorkingDirectory $workingDirectory -DomainNames $DomainNames -AcmeContact $AcmeContact -AcmeDirectory $AcmeDirectory
-
-  $output
+  New-AcmeCertificate -WorkingDirectory $workingDirectory -DomainNames $DomainNames -AcmeContact $AcmeContact -AcmeDirectory $AcmeDirectory
 
   # For wildcard certificates, Posh-ACME replaces * with ! in the directory name
   $certificateName = ($DomainNames | Select-Object -First 1).Replace("*", "!")
   $azureKeyVaultCertificateName = $certificateName.Replace(".", "-").Replace("!", "wildcard")
 
-  Write-Output "Importing Certificate to KeyVault"
-  $newCertificateImported = Import-AcmeCertificateToKeyVault -WorkingDirectory $workingDirectory -CertificateName $certificateName -KeyVaultName $KeyVaultName -KeyVaultCertificateName $azureKeyVaultCertificateName | Out-Null
+  Write-Verbose "Importing Certificate to KeyVault" -Verbose
+  $newCertificateImported = Import-AcmeCertificateToKeyVault -WorkingDirectory $workingDirectory -CertificateName $certificateName -KeyVaultName $KeyVaultName -KeyVaultCertificateName $azureKeyVaultCertificateName
 
   if ($newCertificateImported) {
-    Write-Output "Enabling CDN Endpoint Custom HTTPS"
-    Set-CdnCustomHttps -DomainNames $DomainNames -KeyVaultName $KeyVaultName -KeyVaultSecretName $azureKeyVaultCertificateName -CdnProfileName $CdnProfileName -CdnEndpointName $CdnEndpointName
+    Write-Verbose "Enabling CDN Endpoint Custom HTTPS" -Verbose
+    $cdnActivation = Set-CdnCustomHttps -DomainNames $DomainNames -KeyVaultName $KeyVaultName -KeyVaultSecretName $azureKeyVaultCertificateName -CdnProfileName $CdnProfileName -CdnEndpointName $CdnEndpointName
+    Write-Verbose $cdnActivation -Verbose
   }
 }
 finally {
-  Write-Output "Uploading files..."
+  Write-Verbose "Uploading files..." -Verbose
   Get-ChildItem -File -Recurse $workingDirectory | Set-AzStorageBlobContent -Container $PoshAcmeBlobContainer -Context $storageContext -Force | Out-Null
-  Write-Output "Finished uploading Posh-ACME working directory"
+  Write-Verbose "Finished uploading Posh-ACME working directory" -Verbose
 }
 
