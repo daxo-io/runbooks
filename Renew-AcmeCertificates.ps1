@@ -33,7 +33,7 @@ function Connect-AzureRunAsAccount {
     -CertificateThumbprint $azureRunAsConnection.CertificateThumbprint `
     -ServicePrincipal | Out-Null
 
-  Write-Output "Connected to Azure as AzureRunAsConnection $($azureRunAsConnection.ApplicationId))"
+  Write-Output "Connected to Azure as AzureRunAsConnection ($($azureRunAsConnection.ApplicationId))"
 }
 
 function Get-AzureResourceManagerAccessToken {
@@ -116,31 +116,24 @@ function Import-AcmeCertificateToKeyVault {
   $env:POSHACME_HOME = $WorkingDirectory
   Import-Module -Name Posh-ACME -Force
 
-  # Resolve the details of the certificate
-  $currentServerName = ((Get-PAServer).location) -split "/" | Where-Object -FilterScript { $_ } | Select-Object -Skip 1 -First 1
-  $currentAccountName = (Get-PAAccount).id
+  # Load Certificate Data
+  $certData = Get-PACertificate
 
-  # Determine paths to resources
-  $orderDirectoryPath = Join-Path -Path $WorkingDirectory -ChildPath $currentServerName | Join-Path -ChildPath $currentAccountName | Join-Path -ChildPath $CertificateName
-  $orderDataPath = Join-Path -Path $orderDirectoryPath -ChildPath "order.json"
-  $pfxFilePath = Join-Path -Path $orderDirectoryPath -ChildPath "fullchain.pfx"
+  # Load PFX
+  $flags = [System.Security.Cryptography.X509Certificates.X509KeyStorageFlags]::EphemeralKeySet
+  $certificate = New-Object -TypeName System.Security.Cryptography.X509Certificates.X509Certificate2 -ArgumentList $certData.PfxFullChain, $certData.PfxPass, $flags
 
-  # If we have a order and certificate available
-  if ((Test-Path -Path $orderDirectoryPath) -and (Test-Path -Path $orderDataPath) -and (Test-Path -Path $pfxFilePath)) {
+  $azureKeyVaultCertificate = Get-AzKeyVaultCertificate -VaultName $KeyVaultName -Name $KeyVaultCertificateName -ErrorAction SilentlyContinue
 
-    # Load order data
-    $orderData = Get-Content -Path $orderDataPath -Raw | ConvertFrom-Json
-
-    # Load PFX
-    $certificate = New-Object -TypeName System.Security.Cryptography.X509Certificates.X509Certificate2 -ArgumentList $pfxFilePath, $orderData.PfxPass, "EphemeralKeySet"
-
-    $azureKeyVaultCertificate = Get-AzKeyVaultCertificate -VaultName $KeyVaultName -Name $KeyVaultCertificateName -ErrorAction SilentlyContinue
-
-    # If we have a different certificate, import it
-    If (-not $azureKeyVaultCertificate -or $azureKeyVaultCertificate.Thumbprint -ne $certificate.Thumbprint) {
-      Import-AzKeyVaultCertificate -VaultName $KeyVaultName -Name $KeyVaultCertificateName -FilePath $pfxFilePath -Password (ConvertTo-SecureString -String $orderData.PfxPass -AsPlainText -Force) | Out-Null
-    }
+  # If we have a new certificate, import it
+  If (-not $azureKeyVaultCertificate -or $azureKeyVaultCertificate.Thumbprint -ne $certificate.Thumbprint) {
+    Import-AzKeyVaultCertificate -VaultName $KeyVaultName -Name $KeyVaultCertificateName -FilePath $pfxFilePath -Password $certData.PfxPass | Out-Null
+    Write-Output "New Certificate Imported to KeyVault with Thumbprint $($certificate.Thumbprint)"
+    return $True
   }
+
+  Write-Output "Certificate with Thumbprint $($certificate.Thumbprint) is already present in KeyVault"
+  return $False
 }
 
 function Set-CdnCustomHttps {
@@ -223,17 +216,22 @@ Write-Output "Finished downloading Posh-ACME working directory"
 
 try {
   Write-Output "Renewing Certificate with Posh-ACME"
-  New-AcmeCertificate -WorkingDirectory $workingDirectory -DomainNames $DomainNames -AcmeContact $AcmeContact -AcmeDirectory $AcmeDirectory
+
+  $output = New-AcmeCertificate -WorkingDirectory $workingDirectory -DomainNames $DomainNames -AcmeContact $AcmeContact -AcmeDirectory $AcmeDirectory
+
+  $output
 
   # For wildcard certificates, Posh-ACME replaces * with ! in the directory name
   $certificateName = ($DomainNames | Select-Object -First 1).Replace("*", "!")
   $azureKeyVaultCertificateName = $certificateName.Replace(".", "-").Replace("!", "wildcard")
 
   Write-Output "Importing Certificate to KeyVault"
-  Import-AcmeCertificateToKeyVault -WorkingDirectory $workingDirectory -CertificateName $certificateName -KeyVaultName $KeyVaultName -KeyVaultCertificateName $azureKeyVaultCertificateName | Out-Null
+  $newCertificateImported = Import-AcmeCertificateToKeyVault -WorkingDirectory $workingDirectory -CertificateName $certificateName -KeyVaultName $KeyVaultName -KeyVaultCertificateName $azureKeyVaultCertificateName | Out-Null
 
-  Write-Output "Enabling CDN Endpoint Custom HTTPS"
-  Set-CdnCustomHttps -DomainNames $DomainNames -KeyVaultName $KeyVaultName -KeyVaultSecretName $azureKeyVaultCertificateName -CdnProfileName $CdnProfileName -CdnEndpointName $CdnEndpointName
+  if ($newCertificateImported) {
+    Write-Output "Enabling CDN Endpoint Custom HTTPS"
+    Set-CdnCustomHttps -DomainNames $DomainNames -KeyVaultName $KeyVaultName -KeyVaultSecretName $azureKeyVaultCertificateName -CdnProfileName $CdnProfileName -CdnEndpointName $CdnEndpointName
+  }
 }
 finally {
   Write-Output "Uploading files..."
